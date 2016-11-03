@@ -1,0 +1,24 @@
+#gitignore file :D
+
+#ignore .vidual studio 
+*.sdf
+*.opensdf
+*.suo
+*.vcxproj
+*.filters
+
+#ignore all .o and .a files
+*.[oa]
+
+#ignore all image files
+*.tiff
+*.jpg
+*.bmp
+
+#ignore debug and release folder
+x64/
+LSS/x64/
+Debug/
+Release/
+LSS-LSD-LLF/Debug/
+
