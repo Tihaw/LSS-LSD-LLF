@@ -10,34 +10,147 @@ using std::string;
 
 string filename = "../../Exp/Metal2_20160923.tiff";
 
-cv::Rect showLLF(337, 215, 32, 32);
-
+Mat src;
+Point origin;
 const int Magnifacation = 9;
-
+cv::Rect showLLF(337, 215, 32, 32);
+cv::Rect selection;
 double scale_global = 1;
+enum Method{
+	scale1,
+	scale8,
+	scale8_sharpenLap,
+	scale8_sharpenUSM,
+	scale8_histogramEqualization,
+	scale8_globalContrast,
+};
+Method m = scale1;
 
 int lsdDemoMain(void);
+void llfFetchShow(const Mat &src, Method m);
 
+
+string GetMethodName(Method m){
+	switch (m)
+	{
+	case scale1:
+		return "scale1";
+		break;
+	case scale8:
+		return "scale8";
+		break;
+	case scale8_sharpenLap:
+		return "scale8_sharpenLap";
+		break;
+	case scale8_sharpenUSM:
+		return "scale8_sharpenUSM";
+		break;
+	case scale8_histogramEqualization:
+		return "scale8_histogramEqualization";
+		break;
+	case scale8_globalContrast:
+		return "scale8_globalContrast";
+		break;
+	default:
+		return "";
+		break;
+	}
+}
+
+static void onMouse(int event, int x, int y, int, void*)
+{
+
+	selection.x = MIN(x, origin.x);
+	selection.y = MIN(y, origin.y);
+	selection.width = std::abs(x - origin.x);
+	selection.height = std::abs(y - origin.y);
+
+	//cout << selection.x << " " << selection.y << endl;
+
+	selection &= Rect(0, 0, src.cols, src.rows);
+
+	switch (event)
+	{
+	case CV_EVENT_LBUTTONDOWN:
+		origin = Point(x, y);
+		selection = Rect(x, y, 0, 0);
+		break;
+	case CV_EVENT_LBUTTONUP:
+		showLLF = selection;
+		break;
+	}
+}
 
 void main()
 {
-	//lsdDemoMain();
+	//read image
+	src = imread(filename, IMREAD_GRAYSCALE);
 
-	Mat src = imread(filename, IMREAD_GRAYSCALE);
+	//set mouse interface
+	namedWindow("image preview", WINDOW_AUTOSIZE);
+	setMouseCallback("image preview", onMouse, 0);
+	imshow("image preview", src);
+	waitKey();
+
+	//prompt
+	cout << showLLF.size() << endl;
+	cout << "****	begin different pre proc method!" << endl;
 
 	/************************************************************************/
 	/* image enhancement //  pre proc*/
 	/************************************************************************/
+	switch (m)
 	{
+	case scale1:
 		scale_global = 1.0;
+		llfFetchShow(src, scale1);
+	case scale8:
+		scale_global = 0.8;
+		llfFetchShow(src, scale8);
+	case scale8_sharpenLap:
+	{
+		scale_global = 0.8;
+		Mat sharpenedLap;
+		Mat kernel = (Mat_<float>(3, 3) << 0, -1, 0, -1, 5, -1, 0, -1, 0);
+		filter2D(src, sharpenedLap, src.depth(), kernel);
+		llfFetchShow(sharpenedLap, scale8_sharpenLap);
+	}
+	case scale8_sharpenUSM:
+	{
+		scale_global = 0.8;
+		// sharpen image using "unsharp mask" algorithm
+		Mat blurred;
+		double sigma = 1, threshold = 5, amount = 1;
+		GaussianBlur(src, blurred, Size(), sigma, sigma);
+		Mat lowContrastMask = abs(src - blurred) < threshold;
+		Mat sharpened = src*(1 + amount) + blurred*(-amount);
+		src.copyTo(sharpened, lowContrastMask);
+		llfFetchShow(sharpened, scale8_sharpenUSM);
+	}
+	case scale8_histogramEqualization:
+	{
+		scale_global = 0.8; 
+		Mat histEq;
+		/// Apply Histogram Equalization
+		equalizeHist(src, histEq);
+		llfFetchShow(histEq, scale8_histogramEqualization);
+	}
+	default:
+		break;
 	}
 
+	return;
+}
+
+void llfFetchShow(const Mat &src, Method m)
+{
 	Mat srccpy;
+	src.copyTo(srccpy);
 	src.convertTo(srccpy, CV_64FC1);
 
 	double * image;
 	double * out;
-	int x, y, i, j, n;
+	int n;
 	int X = src.cols;  /* x image size */
 	int Y = src.rows;  /* y image size */
 
@@ -53,12 +166,14 @@ void main()
 	out = lsd_scale(&n, image, X, Y, scale_global);
 
 	/* print output */
+
+	printf("Pre proc method : %s \n", GetMethodName(m).c_str());
 	printf("%d line segments found:\n", n);
 	int count = 0;
-	for (i = 0; i < n; i++)
+	for (int i = 0; i < n; i++)
 	{
-		Point tempX(out[i * 7 + 0], out[i * 7 + 1]);
-		Point tempY(out[i * 7 + 2], out[i * 7 + 3]);
+		Point2d tempX(out[i * 7 + 0], out[i * 7 + 1]);
+		Point2d tempY(out[i * 7 + 2], out[i * 7 + 3]);
 
 		if (showLLF.contains(tempX) &&
 			showLLF.contains(tempY))
@@ -66,29 +181,28 @@ void main()
 			count++;
 		}
 	}
-	printf("%d lines in the showLLF found:\n", count);
+	printf("%d lines in the showLLF found:\n\n\n", count);
 
 	//show
-	cvtColor(src, src, CV_GRAY2BGR);
-	for (i = 0; i < n; i++)
+	src.convertTo(srccpy, CV_8U);
+	cvtColor(srccpy, srccpy, CV_GRAY2BGR);
+	for (int i = 0; i < n; i++)
 	{
-		Point tempX(out[i * 7 + 0], out[i * 7 + 1]);
-		Point tempY(out[i * 7 + 2], out[i * 7 + 3]);
+		Point2d tempX(out[i * 7 + 0], out[i * 7 + 1]);
+		Point2d tempY(out[i * 7 + 2], out[i * 7 + 3]);
 
-		line(src, tempX, tempY, Scalar(0, 255, 0));
+		line(srccpy, tempX, tempY, Scalar(0, 255, 0));
 	}
 
-	Mat result = src(showLLF);
-	resize(src(showLLF), result, 
+	Mat result = srccpy(showLLF);
+	resize(srccpy(showLLF), result,
 		Size(showLLF.width*Magnifacation, showLLF.height*Magnifacation));
 
-	imshow("detected lines", result);
+	imshow(GetMethodName(m).append("lines detected"), result);
 	waitKey(0);
 
 	/* free memory */
 	free((void *)out);
-
-	return;
 }
 
 extern "C"
@@ -142,7 +256,7 @@ extern "C"
 					double x2 = Magnifacation / 2 + Magnifacation / 2 / tan(tempAngle);
 					double y2 = Magnifacation;
 
-					line(roi, Point(x1, y1), Point(x2, y2), Scalar(0));
+					line(roi, Point2d(x1, y1), Point2d(x2, y2), Scalar(0));
 					continue;
 				}
 			}
@@ -150,14 +264,15 @@ extern "C"
 
 		//!!!!gaussian re-sample changed the size
 		Rect tempRect(showLLF);
-		tempRect.x *= Magnifacation*scale_global;
-		tempRect.y *= Magnifacation*scale_global;
-		tempRect.width *= Magnifacation*scale_global;
-		tempRect.height *= Magnifacation*scale_global;
+		tempRect.x = static_cast<int>(tempRect.x * Magnifacation*scale_global);
+		tempRect.y = static_cast<int>(tempRect.y * Magnifacation*scale_global);
+		tempRect.width = static_cast<int>(tempRect.width * Magnifacation*scale_global);
+		tempRect.height = static_cast<int>(tempRect.height * Magnifacation*scale_global);
+
 		cv::Mat showAdequateSize = levelLineFieldShow(tempRect);
 
 		imshow("level-line field", showAdequateSize);
-		waitKey();
+		waitKey(10);
 
 		//exit(0);
 	}
