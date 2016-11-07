@@ -22,4 +22,11 @@ LSS/x64/
 Debug/
 Release/
 LSS-LSD-LLF/Debug/
+LSS-LSD-LLF/RESULT/
+RESULT/
+
+#ignore zipfiles
+*.zip
+*.rar
+*.7z
 

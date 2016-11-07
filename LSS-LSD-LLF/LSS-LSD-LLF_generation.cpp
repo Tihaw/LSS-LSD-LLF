@@ -5,15 +5,20 @@ extern "C"
 }
 
 #include <string>
+#include <sstream>
+
+#define LLF_DEBUG
 
 using std::string;
 
 string filename = "../../Exp/Metal2_20160923.tiff";
+stringstream info;
 
 Mat src;
+Mat llfImg;
 Point origin;
-const int Magnifacation = 9;
-cv::Rect showLLF(337, 215, 32, 32);
+const int Magnifacation = 5;
+cv::Rect showLLFRoi(337, 215, 32, 32);
 cv::Rect selection;
 double scale_global = 1;
 enum Method{
@@ -22,7 +27,7 @@ enum Method{
 	scale8_sharpenLap,
 	scale8_sharpenUSM,
 	scale8_histogramEqualization,
-	scale8_globalContrast,
+	scale8_localContrast,
 };
 Method m = scale1;
 
@@ -40,16 +45,16 @@ string GetMethodName(Method m){
 		return "scale8";
 		break;
 	case scale8_sharpenLap:
-		return "scale8_sharpenLap";
+		return "8_sharpenLap";
 		break;
 	case scale8_sharpenUSM:
-		return "scale8_sharpenUSM";
+		return "8_sharpenUSM";
 		break;
 	case scale8_histogramEqualization:
-		return "scale8_histogramEqualization";
+		return "8_histogramEqualization";
 		break;
-	case scale8_globalContrast:
-		return "scale8_globalContrast";
+	case scale8_localContrast:
+		return "8_localContrast";
 		break;
 	default:
 		return "";
@@ -76,7 +81,7 @@ static void onMouse(int event, int x, int y, int, void*)
 		selection = Rect(x, y, 0, 0);
 		break;
 	case CV_EVENT_LBUTTONUP:
-		showLLF = selection;
+		showLLFRoi = selection;
 		break;
 	}
 }
@@ -87,13 +92,14 @@ void main()
 	src = imread(filename, IMREAD_GRAYSCALE);
 
 	//set mouse interface
-	namedWindow("image preview", WINDOW_AUTOSIZE);
-	setMouseCallback("image preview", onMouse, 0);
-	imshow("image preview", src);
+	namedWindow("image preview & select target", WINDOW_AUTOSIZE);
+	setMouseCallback("image preview & select target", onMouse, 0);
+	imshow("image preview & select target", src);
 	waitKey();
+	//destroyWindow("image preview & select target");
 
 	//prompt
-	cout << showLLF.size() << endl;
+	cout << showLLFRoi.size() << endl;
 	cout << "****	begin different pre proc method!" << endl;
 
 	/************************************************************************/
@@ -110,9 +116,11 @@ void main()
 	case scale8_sharpenLap:
 	{
 		scale_global = 0.8;
+		// sharpen image using Laplacian mask algorithm
 		Mat sharpenedLap;
 		Mat kernel = (Mat_<float>(3, 3) << 0, -1, 0, -1, 5, -1, 0, -1, 0);
 		filter2D(src, sharpenedLap, src.depth(), kernel);
+
 		llfFetchShow(sharpenedLap, scale8_sharpenLap);
 	}
 	case scale8_sharpenUSM:
@@ -125,15 +133,34 @@ void main()
 		Mat lowContrastMask = abs(src - blurred) < threshold;
 		Mat sharpened = src*(1 + amount) + blurred*(-amount);
 		src.copyTo(sharpened, lowContrastMask);
+
 		llfFetchShow(sharpened, scale8_sharpenUSM);
 	}
 	case scale8_histogramEqualization:
 	{
-		scale_global = 0.8; 
+		scale_global = 0.8;
 		Mat histEq;
 		/// Apply Histogram Equalization
 		equalizeHist(src, histEq);
 		llfFetchShow(histEq, scale8_histogramEqualization);
+	}
+	case scale8_localContrast:
+	{
+		scale_global = 0.8;
+		double alpha = 1.7;
+		int beta = 0;
+		Mat new_image = Mat::zeros(src.size(), src.type());;
+		//adjust contrast, especially the DM code area
+		for (int y = 0; y < src.rows; y++)
+		{
+			for (int x = 0; x < src.cols; x++)
+			{
+				new_image.at<uchar>(y, x) =
+					saturate_cast<uchar>(alpha*(src.at<uchar>(y, x)) + beta);
+			}
+		}
+
+		llfFetchShow(new_image, scale8_localContrast); 
 	}
 	default:
 		break;
@@ -144,9 +171,10 @@ void main()
 
 void llfFetchShow(const Mat &src, Method m)
 {
-	Mat srccpy;
-	src.copyTo(srccpy);
-	src.convertTo(srccpy, CV_64FC1);
+	Mat srcgray;
+	src.copyTo(srcgray);
+
+	srcgray.convertTo(srcgray, CV_64FC1);
 
 	double * image;
 	double * out;
@@ -155,7 +183,7 @@ void llfFetchShow(const Mat &src, Method m)
 	int Y = src.rows;  /* y image size */
 
 	/* create a simple image: left half black, right half gray */
-	image = (double *)(srccpy.data);
+	image = (double *)(srcgray.data);
 	if (image == NULL)
 	{
 		fprintf(stderr, "error: not enough memory\n");
@@ -166,40 +194,89 @@ void llfFetchShow(const Mat &src, Method m)
 	out = lsd_scale(&n, image, X, Y, scale_global);
 
 	/* print output */
-
 	printf("Pre proc method : %s \n", GetMethodName(m).c_str());
 	printf("%d line segments found:\n", n);
+	//count
 	int count = 0;
 	for (int i = 0; i < n; i++)
 	{
 		Point2d tempX(out[i * 7 + 0], out[i * 7 + 1]);
 		Point2d tempY(out[i * 7 + 2], out[i * 7 + 3]);
 
-		if (showLLF.contains(tempX) &&
-			showLLF.contains(tempY))
+		if (showLLFRoi.contains(tempX) &&
+			showLLFRoi.contains(tempY))
 		{
 			count++;
 		}
 	}
-	printf("%d lines in the showLLF found:\n\n\n", count);
+	printf("%d lines in the showLLF found:\n", count);
 
-	//show
-	src.convertTo(srccpy, CV_8U);
-	cvtColor(srccpy, srccpy, CV_GRAY2BGR);
+	//PPI img
+	Mat ppI = src(showLLFRoi);
+	resize(src(showLLFRoi), ppI,
+		Size(static_cast<int>(showLLFRoi.width*Magnifacation*scale_global),
+		static_cast<int>(showLLFRoi.height*Magnifacation*scale_global)));
+	cvtColor(ppI, ppI, CV_GRAY2BGR);
+
+	//llf img
+	llfImg.convertTo(llfImg, CV_8U);
+	cvtColor(llfImg, llfImg, CV_GRAY2BGR);
+
+	//show result
+	Mat result(llfImg.size(), CV_8UC3);
 	for (int i = 0; i < n; i++)
 	{
-		Point2d tempX(out[i * 7 + 0], out[i * 7 + 1]);
-		Point2d tempY(out[i * 7 + 2], out[i * 7 + 3]);
-
-		line(srccpy, tempX, tempY, Scalar(0, 255, 0));
+		Point2d tempX(out[i * 7 + 0] * Magnifacation * scale_global, 
+					  out[i * 7 + 1] * Magnifacation * scale_global);
+		Point2d tempY(out[i * 7 + 2] * Magnifacation * scale_global, 
+					  out[i * 7 + 3] * Magnifacation * scale_global);
+		line(result, tempX, tempY, Scalar(0, 255, 0), Magnifacation);
 	}
+	addWeighted(result, 0.5, llfImg, 0.5, 0, result);
 
-	Mat result = srccpy(showLLF);
-	resize(srccpy(showLLF), result,
-		Size(showLLF.width*Magnifacation, showLLF.height*Magnifacation));
+	// re select roi for llf and result
+	Rect magnifiedRoi;
+	magnifiedRoi.x = static_cast<int>(showLLFRoi.x * Magnifacation*scale_global);
+	magnifiedRoi.y = static_cast<int>(showLLFRoi.y * Magnifacation*scale_global);
+	magnifiedRoi.width = static_cast<int>(showLLFRoi.width * Magnifacation*scale_global);
+	magnifiedRoi.height = static_cast<int>(showLLFRoi.height * Magnifacation*scale_global);
+	cv::Mat llfShow = llfImg(magnifiedRoi);
+	cv::Mat resultShow = result(magnifiedRoi);
+	
+	// mix three img into one 4 show
+	Mat mixedResult = Mat::zeros(resultShow.rows * 3, resultShow.cols, CV_8UC3);
+	ppI.copyTo(mixedResult(Range(0, ppI.rows), Range(0, ppI.cols)));
+	llfShow.copyTo(mixedResult(Range(llfShow.rows, llfShow.rows * 2), Range(0, llfShow.cols)));
+	resultShow.copyTo(mixedResult(Range(resultShow.rows * 2, resultShow.rows * 3), Range(0, resultShow.cols)));
 
-	imshow(GetMethodName(m).append("lines detected"), result);
-	waitKey(0);
+	//show with info
+	info.str("");
+	info << "m: " << GetMethodName(m);
+	putText(mixedResult, info.str(),
+		Point(0, 10), FONT_HERSHEY_PLAIN, 1.0, Scalar(0, 0, 255), 1);
+
+	info.str("");
+	info << "r: " << count << "/" << n;
+	putText(mixedResult, info.str(),
+		Point(0, 20), FONT_HERSHEY_PLAIN, 1.0, Scalar(0, 0, 255), 1);
+
+#ifdef LLF_DEBUG
+	imshow(GetMethodName(m).append("_LSD_result"), mixedResult);
+	printf("press 'n' to proc next img \n\n\n");
+
+	while (char c = waitKey())
+	{
+	if (c == 'n')
+	{
+	break;
+	}
+	}
+#endif
+
+#ifndef LLF_DEBUG
+	imwrite(GetMethodName(m).append(".tiff"), mixedResult);
+#endif
+
 
 	/* free memory */
 	free((void *)out);
@@ -209,9 +286,9 @@ extern "C"
 {
 	void showLevelLineField(int width, int height, double *angle)
 	{
-		Mat levelLineFieldShow(height * Magnifacation, 
+		Mat levelLineFieldShow(height * Magnifacation,
 			width * Magnifacation, CV_8U, Scalar(255));
-		
+
 		/*
 		//draw mesh
 		for (int i = 0; i < height; ++i)
@@ -261,20 +338,18 @@ extern "C"
 				}
 			}
 		}
-
+		
+/*
 		//!!!!gaussian re-sample changed the size
-		Rect tempRect(showLLF);
-		tempRect.x = static_cast<int>(tempRect.x * Magnifacation*scale_global);
-		tempRect.y = static_cast<int>(tempRect.y * Magnifacation*scale_global);
-		tempRect.width = static_cast<int>(tempRect.width * Magnifacation*scale_global);
-		tempRect.height = static_cast<int>(tempRect.height * Magnifacation*scale_global);
+		Rect magnifiedRoi;
+		magnifiedRoi.x = static_cast<int>(showLLFRoi.x * Magnifacation*scale_global);
+		magnifiedRoi.y = static_cast<int>(showLLFRoi.y * Magnifacation*scale_global);
+		magnifiedRoi.width = static_cast<int>(showLLFRoi.width * Magnifacation*scale_global);
+		magnifiedRoi.height = static_cast<int>(showLLFRoi.height * Magnifacation*scale_global);
 
-		cv::Mat showAdequateSize = levelLineFieldShow(tempRect);
+		cv::Mat showAdequateSize = levelLineFieldShow(magnifiedRoi);*/
 
-		imshow("level-line field", showAdequateSize);
-		waitKey(10);
-
-		//exit(0);
+		levelLineFieldShow.copyTo(llfImg);
 	}
 } // extern C
 
