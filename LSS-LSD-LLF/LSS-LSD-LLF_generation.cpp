@@ -8,6 +8,8 @@ extern "C"
 #include <sstream>
 
 #define LLF_DEBUG
+//#define LLF_SHOWGLOBAL
+//#define LSS_ShowNoiseRate
 
 using std::string;
 
@@ -173,7 +175,6 @@ void llfFetchShow(const Mat &src, Method m)
 {
 	Mat srcgray;
 	src.copyTo(srcgray);
-
 	srcgray.convertTo(srcgray, CV_64FC1);
 
 	double * image;
@@ -260,6 +261,13 @@ void llfFetchShow(const Mat &src, Method m)
 	putText(mixedResult, info.str(),
 		Point(0, 20), FONT_HERSHEY_PLAIN, 1.0, Scalar(0, 0, 255), 1);
 
+#ifdef LLF_SHOWGLOBAL
+	Mat temp;
+	resize(llfImg, temp, Size(llfImg.cols / Magnifacation, llfImg.rows / Magnifacation));
+	imshow("11", temp);
+	waitKey();
+#endif
+
 #ifdef LLF_DEBUG
 	imshow(GetMethodName(m).append("_LSD_result"), mixedResult);
 	printf("press 'n' to proc next img \n\n\n");
@@ -304,6 +312,11 @@ extern "C"
 		}
 		}*/
 
+		/*for noise rate cal*/
+		int noiseCount = 0;
+		Rect noneNoiseArea(312 * scale_global, 195 * scale_global,
+			608 * scale_global, 608 * scale_global);
+
 		for (int i = 0; i < height; ++i)
 		{
 			for (int j = 0; j < width; ++j)
@@ -323,10 +336,8 @@ extern "C"
 				{
 					line(roi, Point(0, Magnifacation / 2),
 						Point(Magnifacation, Magnifacation / 2), Scalar(0));
-					continue;
 				}
-
-				//rest
+				else
 				{
 					double x1 = Magnifacation / 2 - Magnifacation / 2 / tan(tempAngle);
 					double y1 = 0;
@@ -334,22 +345,25 @@ extern "C"
 					double y2 = Magnifacation;
 
 					line(roi, Point2d(x1, y1), Point2d(x2, y2), Scalar(0));
-					continue;
 				}
-			}
-		}
-		
-/*
-		//!!!!gaussian re-sample changed the size
-		Rect magnifiedRoi;
-		magnifiedRoi.x = static_cast<int>(showLLFRoi.x * Magnifacation*scale_global);
-		magnifiedRoi.y = static_cast<int>(showLLFRoi.y * Magnifacation*scale_global);
-		magnifiedRoi.width = static_cast<int>(showLLFRoi.width * Magnifacation*scale_global);
-		magnifiedRoi.height = static_cast<int>(showLLFRoi.height * Magnifacation*scale_global);
-
-		cv::Mat showAdequateSize = levelLineFieldShow(magnifiedRoi);*/
-
+				
+				//for cal noise rate
+				if (!noneNoiseArea.contains(Point(j,i)))
+				{
+					noiseCount++;
+				}
+			} // for width
+		}// for height
+	
 		levelLineFieldShow.copyTo(llfImg);
+
+#ifdef LSS_ShowNoiseRate
+		cout << "noise rate is :" << 
+			1.0 * noiseCount / 
+			(1.0 * width * height - noneNoiseArea.width*noneNoiseArea.height) << endl;
+#endif // DEBUG
+
+
 	}
 } // extern C
 
